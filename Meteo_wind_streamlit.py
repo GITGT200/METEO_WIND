@@ -29,8 +29,8 @@ from streamlit_folium import folium_static
 
 st.sidebar.title('Projet "Meteo Wind"')
 st.sidebar.subheader('Menu')
-dif_parti=["Carte des vents","Evolution du vent en un point", "Bathymétrie marine", \
-           "Faune protégée",'Flore protégée','xxxxxx']
+dif_parti=["Carte des vents","Evolution du vent en un point", "Bathymétrie", \
+           "Faune protégée",'Flore protégée','Couloir de migration des petits oiseaux']
 Partie=st.sidebar.radio(' ',options=dif_parti)
 
 from_year = st.sidebar.number_input("A partir de l'année", value=2020)
@@ -156,7 +156,7 @@ df["Vitesse"] = round((df["u"]**2 + df["v"]**2)**0.5,1)
 
 if Partie==dif_parti[0]:
     st.title("Carte des vents")
-    st.info("Dans cette section, nous voyons la carte des vents.")
+    st.info("Cette carte permet de repérer les sites où la vitesse du vent est la plus élevée sur la période et sur la fenêtre géographique choisies par l'utilisateur")
     
     # latitude_sup = st.number_input('Latitude supérieure', value=44.0)
     # latitude_inf = st.number_input('Latitude inférieure', value=42.0)
@@ -165,6 +165,8 @@ if Partie==dif_parti[0]:
     
     df = df[(df["lat"] <= north) & (df["lat"] >= south) &\
         (df["lon"] <= east) & (df["lon"] >= west)]
+        
+        
 
     x = df["lon"]
     y = df["lat"]
@@ -265,7 +267,7 @@ if Partie==dif_parti[0]:
         }, name="Couleurs d'interpolation").add_to(mapa)
      
     # Add the colormap to the folium map
-    feature_group1.caption = 'Temperature'
+    feature_group1.caption = 'Wind speed'
      
     
     mapa.add_child(feature_group1)
@@ -274,10 +276,109 @@ if Partie==dif_parti[0]:
     folium_static(mapa)
     
 if Partie==dif_parti[1]:
-    st.title("Evolution du vent en un point")
-    st.info("Dans cette section, nous voyons la carte des vents.")
+    #Parameter:
+    product='reanalysis-era5-single-levels-monthly-means'
+    parameters=['100m_u_component_of_wind',
+                '100m_v_component_of_wind',
+                ]
     
-    def GetSpeedTimeForEachPoint(ncdffile='1978_2021.nc'):
+    from_month=1
+    to_month=12
+    
+    if __name__ == '__main__':
+    
+        import cdsapi
+        import xarray as xr
+        c = cdsapi.Client()
+    
+        years=[]
+        for year in range(from_year, to_year+1):
+            years.append(str(year))
+        months=[]
+        for month in range(from_month, to_month+1):
+            if month <= 9:
+                months.append('0'+str(month))
+            else:
+                months.append(str(month))
+    
+        c.retrieve(product,
+            {
+                'format': 'netcdf',
+                'product_type': 'monthly_averaged_reanalysis',
+                'variable': parameters,
+                'year': years,
+                'month': months,
+                'time': '00:00',
+                'area': [
+                    north, west, south, east,
+                ],
+            },
+            str(from_year)+'_'+str(to_year)+'.nc')
+    def ncdfToCsv(ncdffile, outputfilename):
+      """
+      :param ncdffile: path to data in ncdf format. The file is from cds data producer
+      :type ncdffile: string
+      """
+      
+      ds = nc.Dataset(ncdffile)
+    
+      lats = ds.variables['latitude'][:]  
+      lons = ds.variables['longitude'][:]
+      time = ds.variables['time'][:]
+      v_wind = ds.variables['v100'][:]
+      u_wind = ds.variables['u100'][:] 
+    
+      np_lats = np.ones((lats.shape[0], lons.shape[0]))
+      np_lons = np.ones((lats.shape[0], lons.shape[0]))
+    
+      i=0
+      
+      for (lat)  in (lats):
+          #print(lat)
+          np_lats[i, :] = lat;
+          #print(np_lats)
+          i+= 1
+      i=0
+      for (lon)  in (lons):
+          #print(lon)
+          np_lons[:, i] = lon
+          #print(np_lons)
+          i+= 1
+      
+      with open(outputfilename, 'w', encoding='UTF8') as f:
+          writer = csv.writer(f)
+          header = ['time', 'lon', 'lat', 'v', 'u']
+          # write the header
+          writer.writerow(header)
+          #file file with data
+          num_mois=0
+          
+          for mois in time:
+              V = v_wind[num_mois]
+              U = u_wind[num_mois]
+              for num_lat in range(np_lats.shape[0]):
+                  for num_lon in range(np_lons.shape[1]):
+                      lon = np_lons[num_lat, num_lon]
+                      lat = np_lats[num_lat, num_lon]
+                      
+                      v = V[num_lat, num_lon]
+                      u = U[num_lat, num_lon]
+                      if (u!="--" or v!="--"):
+                          #print(u, v)
+                          # write the data
+                          data = [mois, lon, lat, v, u]
+                          writer.writerow(data)
+        
+              num_mois +=1;
+    
+    
+    ncdfToCsv(str(from_year)+'_'+str(to_year)+'.nc', str(from_year)+'_'+str(to_year)+'.csv')
+        
+        
+    st.title("Evolution mensuelle de la vitesse moyenne du vent")
+    st.info("Après avoir repéré un point à fort potentiel, l'utilisateur peut en voir l'évolution sur une longue durée")
+    
+    def GetSpeedTimeForEachPoint0(ncdffile='1978_2021.nc'):
       ds = nc.Dataset(ncdffile)
       lats = ds.variables['latitude'][:]  
       lons = ds.variables['longitude'][:]
@@ -316,14 +417,26 @@ if Partie==dif_parti[1]:
           a +=1
         a = 0
       return(np_speed, np_time)
-    
-    sp, time = GetSpeedTimeForEachPoint()
-    
     num_pt = st.number_input('Numéro du point :', value=6)
+  
+    def GetSpeedTimeForEachPoint(cscdffile, coord):
+        df=pd.read_csv(cscdffile)
+        df = df[(df["lon"]==coord[0]) & (df["lat"]==coord[1])]
+        df["Vitesse"] = round((df["u"]**2 + df["v"]**2)**0.5,1)
+        
+        return(df["time"].to_numpy(), df["Vitesse"].to_numpy())
+    
+    time,  v = GetSpeedTimeForEachPoint(str(from_year)+'_'+str(to_year)+'.csv', [df["lon"][num_pt], df["lat"][num_pt]])
+    
+    
     fig = plt.figure(figsize=(8, 6))
-    plt.xlabel("mounthly date from 1979 to 2021")
-    plt.ylabel("Vitesse (m/s")
-    plt.plot(time[num_pt, :],sp[num_pt, :])
+    plt.xlabel("Time in months")
+    plt.ylabel("Wind speed (m/s)")
+    plt.plot(np.arange(0,len(time)),v)
     
     st.pyplot(fig);
+    
+if Partie==dif_parti[2]:
+    st.title("Bathymétrie")
+    st.info("Cette carte permettra de croiser les informations de fonds marins avant d'y implanter une éolienne")
     

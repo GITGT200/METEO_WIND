@@ -29,12 +29,12 @@ from streamlit_folium import folium_static
 
 st.sidebar.title('Projet "Meteo Wind"')
 st.sidebar.subheader('Menu')
-dif_parti=["Carte des vents","Batimétrie marine", \
-           "Faune protégée",'Flore protégée']
+dif_parti=["Carte des vents","Evolution du vent en un point", "Bathymétrie marine", \
+           "Faune protégée",'Flore protégée','xxxxxx']
 Partie=st.sidebar.radio(' ',options=dif_parti)
 
 from_year = st.sidebar.number_input("A partir de l'année", value=2020)
-to_year = st.sidebar.number_input("Jusqu'à de l'année", value=2021)
+to_year = st.sidebar.number_input("Jusqu'à de l'année", value=2020)
 north = st.sidebar.number_input('Latitude Nord', value=44.0)
 south = st.sidebar.number_input('Latitude Sud', value=42.0)
 east = st.sidebar.number_input('Longitude Est', value=8.0)
@@ -47,8 +47,8 @@ parameters=['100m_u_component_of_wind',
             '100m_v_component_of_wind',
             ]
 
-from_month=1
-to_month=12
+from_month=3
+to_month=3
 
 if __name__ == '__main__':
 
@@ -91,6 +91,7 @@ def ncdfToCsv(ncdffile, outputfilename):
   :param ncdffile: path to data in ncdf format. The file is from cds data producer
   :type ncdffile: string
   """
+  
   ds = nc.Dataset(ncdffile)
 
   lats = ds.variables['latitude'][:]  
@@ -103,6 +104,7 @@ def ncdfToCsv(ncdffile, outputfilename):
   np_lons = np.ones((lats.shape[0], lons.shape[0]))
 
   i=0
+  
   for (lat)  in (lats):
       #print(lat)
       np_lats[i, :] = lat;
@@ -114,7 +116,7 @@ def ncdfToCsv(ncdffile, outputfilename):
       np_lons[:, i] = lon
       #print(np_lons)
       i+= 1
-
+  
   with open(outputfilename, 'w', encoding='UTF8') as f:
       writer = csv.writer(f)
       header = ['time', 'lon', 'lat', 'v', 'u']
@@ -122,13 +124,15 @@ def ncdfToCsv(ncdffile, outputfilename):
       writer.writerow(header)
       #file file with data
       num_mois=0
+      
       for mois in time:
-          V = v_wind[num_mois][0]
-          U = u_wind[num_mois][0]
+          V = v_wind[num_mois]
+          U = u_wind[num_mois]
           for num_lat in range(np_lats.shape[0]):
               for num_lon in range(np_lons.shape[1]):
                   lon = np_lons[num_lat, num_lon]
                   lat = np_lats[num_lat, num_lon]
+                  
                   v = V[num_lat, num_lon]
                   u = U[num_lat, num_lon]
                   if (u!="--" or v!="--"):
@@ -205,7 +209,9 @@ if Partie==dif_parti[0]:
         latitude = df.iloc[i,2]
         longitude = df.iloc[i,1]
         vitesse = df.iloc[i,5]
-        m = "<strong>" + "Vitesse : " + "</strong>" + str(vitesse) + " m/s"
+        m = "<strong>" + "Vitesse : " + "</strong>" + str(vitesse) + " m/s" + \
+            "<br><strong>" + "Point : " + "</strong>" + str(i)
+        
         folium.CircleMarker([latitude, longitude], radius = 5,color=None,fill_color ="red",
                         fill_opacity=0.5,popup = folium.Popup(m, max_width = 400)).add_to(mapa)
     
@@ -216,7 +222,7 @@ if Partie==dif_parti[0]:
     # Setup colormap
     colors = ["#ffeda0" ,"#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#bd0026", "#800026"]
     vmin   = 0 
-    vmax   = 7 
+    vmax   = df["Vitesse"].max()
     levels = len(colors)
     feature_group1 = branca.colormap.LinearColormap(colors, vmin=vmin, vmax=vmax).to_step(levels)
      
@@ -266,3 +272,58 @@ if Partie==dif_parti[0]:
     mapa.add_child(folium.map.LayerControl())
     
     folium_static(mapa)
+    
+if Partie==dif_parti[1]:
+    st.title("Evolution du vent en un point")
+    st.info("Dans cette section, nous voyons la carte des vents.")
+    
+    def GetSpeedTimeForEachPoint(ncdffile='1978_2021.nc'):
+      ds = nc.Dataset(ncdffile)
+      lats = ds.variables['latitude'][:]  
+      lons = ds.variables['longitude'][:]
+      time = ds.variables['time'][:]
+      v_wind = ds.variables['v100'][:]
+      u_wind = ds.variables['u100'][:] 
+    
+      np_lats = np.ones((lats.shape[0], lons.shape[0]))
+      np_lons = np.ones((lats.shape[0], lons.shape[0]))
+    
+      i=0
+      for (lat)  in (lats):
+        #print(lat)
+        np_lats[i, :] = lat;
+        #print(np_lats)
+        i+= 1
+      i=0
+      for (lon)  in (lons):
+        #print(lon)
+        np_lons[:, i] = lon
+        #print(np_lons)
+        i+= 1
+    
+      np_speed = np.ones((np_lons.shape[0] * np_lons.shape[1], time.shape[0]))
+      np_time = np.ones((np_lons.shape[0] * np_lons.shape[1], time.shape[0]))
+      a = 0
+      for num_lat in range(np_lats.shape[0]):
+        for num_lon in range(np_lons.shape[1]):
+          for num_mois in range(time.shape[0]):
+            V = v_wind[num_mois][0]
+            U = u_wind[num_mois][0]
+            v = V[num_lat, num_lon]
+            u = U[num_lat, num_lon]
+            np_speed[a, num_mois] = (u**2 + v**2)**0.5
+            np_time[a, num_mois] = num_mois
+          a +=1
+        a = 0
+      return(np_speed, np_time)
+    
+    sp, time = GetSpeedTimeForEachPoint()
+    
+    num_pt = st.number_input('Numéro du point :', value=6)
+    fig = plt.figure(figsize=(8, 6))
+    plt.xlabel("mounthly date from 1979 to 2021")
+    plt.ylabel("Vitesse (m/s")
+    plt.plot(time[num_pt, :],sp[num_pt, :])
+    
+    st.pyplot(fig);
+    
